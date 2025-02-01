@@ -6,6 +6,7 @@
 (define-constant err-not-found (err u101))
 (define-constant err-already-exists (err u102))
 (define-constant err-unauthorized (err u103))
+(define-constant err-already-voted (err u104))
 
 ;; Data Variables
 (define-map brands
@@ -16,7 +17,9 @@
         sustainability-score: uint,
         ethical-score: uint,
         verified: bool,
-        registration-date: uint
+        registration-date: uint,
+        community-trust-score: uint,
+        vote-count: uint
     }
 )
 
@@ -28,6 +31,11 @@
         recycled-materials: bool,
         last-updated: uint
     }
+)
+
+(define-map user-votes
+    { brand-id: uint, voter: principal }
+    { score: uint }
 )
 
 (define-data-var next-brand-id uint u1)
@@ -49,7 +57,9 @@
                 sustainability-score: sustainability-score,
                 ethical-score: ethical-score,
                 verified: false,
-                registration-date: block-height
+                registration-date: block-height,
+                community-trust-score: u0,
+                vote-count: u0
             }
         )
         (var-set next-brand-id (+ brand-id u1))
@@ -90,6 +100,34 @@
     )
 )
 
+;; Submit community trust vote
+(define-public (submit-trust-vote (brand-id uint) (score uint))
+    (let
+        (
+            (brand-info (unwrap! (map-get? brands {brand-id: brand-id}) err-not-found))
+            (existing-vote (map-get? user-votes {brand-id: brand-id, voter: tx-sender}))
+        )
+        (asserts! (is-none existing-vote) err-already-voted)
+        (asserts! (<= score u100) (err u105))
+        
+        (map-set user-votes
+            {brand-id: brand-id, voter: tx-sender}
+            {score: score}
+        )
+        
+        (ok (map-set brands
+            { brand-id: brand-id }
+            (merge brand-info
+                {
+                    community-trust-score: (/ (+ (* (get community-trust-score brand-info) (get vote-count brand-info)) score)
+                                            (+ (get vote-count brand-info) u1)),
+                    vote-count: (+ (get vote-count brand-info) u1)
+                }
+            )
+        ))
+    )
+)
+
 ;; Read-only functions
 
 (define-read-only (get-brand-info (brand-id uint))
@@ -98,4 +136,8 @@
 
 (define-read-only (get-brand-certifications (brand-id uint))
     (ok (map-get? brand-certifications {brand-id: brand-id}))
+)
+
+(define-read-only (get-user-vote (brand-id uint) (voter principal))
+    (ok (map-get? user-votes {brand-id: brand-id, voter: voter}))
 )
