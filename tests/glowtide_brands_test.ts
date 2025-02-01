@@ -76,36 +76,56 @@ Clarinet.test({
 });
 
 Clarinet.test({
-  name: "Test brand verification",
+  name: "Test community trust voting",
   async fn(chain: Chain, accounts: Map<string, Account>) {
     const deployer = accounts.get('deployer')!;
     const wallet1 = accounts.get('wallet_1')!;
+    const wallet2 = accounts.get('wallet_2')!;
     
     // Register brand
     let block = chain.mineBlock([
       Tx.contractCall('glowtide-brands', 'register-brand', [
-        types.ascii("EthicalBrand"),
+        types.ascii("VotedBrand"),
         types.uint(88),
         types.uint(92)
       ], deployer.address)
     ]);
     
-    // Verify brand
+    // Submit votes
     block = chain.mineBlock([
-      Tx.contractCall('glowtide-brands', 'verify-brand', [
-        types.uint(1)
-      ], deployer.address)
+      Tx.contractCall('glowtide-brands', 'submit-trust-vote', [
+        types.uint(1),
+        types.uint(90)
+      ], wallet1.address),
+      
+      Tx.contractCall('glowtide-brands', 'submit-trust-vote', [
+        types.uint(1),
+        types.uint(80)
+      ], wallet2.address)
     ]);
     
     block.receipts[0].result.expectOk();
+    block.receipts[1].result.expectOk();
     
-    // Non-owner verification should fail
+    // Check brand info
+    let brandInfo = chain.callReadOnlyFn(
+      'glowtide-brands',
+      'get-brand-info',
+      [types.uint(1)],
+      deployer.address
+    );
+    
+    let result = brandInfo.result.expectOk().expectSome();
+    assertEquals(result['vote-count'], types.uint(2));
+    
+    // Duplicate vote should fail
     block = chain.mineBlock([
-      Tx.contractCall('glowtide-brands', 'verify-brand', [
-        types.uint(1)
+      Tx.contractCall('glowtide-brands', 'submit-trust-vote', [
+        types.uint(1),
+        types.uint(85)
       ], wallet1.address)
     ]);
     
-    block.receipts[0].result.expectErr(types.uint(100));
+    block.receipts[0].result.expectErr(types.uint(104));
   },
 });
