@@ -7,6 +7,8 @@
 (define-constant err-already-exists (err u102))
 (define-constant err-unauthorized (err u103))
 (define-constant err-already-voted (err u104))
+(define-constant err-invalid-score (err u105))
+(define-constant err-brand-inactive (err u106))
 
 ;; Data Variables
 (define-map brands
@@ -17,6 +19,7 @@
         sustainability-score: uint,
         ethical-score: uint,
         verified: bool,
+        active: bool,
         registration-date: uint,
         community-trust-score: uint,
         vote-count: uint
@@ -49,6 +52,9 @@
             (brand-id (var-get next-brand-id))
         )
         (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+        (asserts! (<= sustainability-score u100) err-invalid-score)
+        (asserts! (<= ethical-score u100) err-invalid-score)
+        
         (map-insert brands
             { brand-id: brand-id }
             {
@@ -57,12 +63,14 @@
                 sustainability-score: sustainability-score,
                 ethical-score: ethical-score,
                 verified: false,
+                active: true,
                 registration-date: block-height,
                 community-trust-score: u0,
                 vote-count: u0
             }
         )
         (var-set next-brand-id (+ brand-id u1))
+        (print { event: "brand-registered", brand-id: brand-id, name: name })
         (ok brand-id)
     )
 )
@@ -74,6 +82,7 @@
             (brand-info (unwrap! (map-get? brands {brand-id: brand-id}) err-not-found))
         )
         (asserts! (is-eq tx-sender (get owner brand-info)) err-unauthorized)
+        (asserts! (get active brand-info) err-brand-inactive)
         (ok (map-set brand-certifications
             { brand-id: brand-id }
             {
@@ -93,9 +102,26 @@
             (brand-info (unwrap! (map-get? brands {brand-id: brand-id}) err-not-found))
         )
         (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+        (asserts! (get active brand-info) err-brand-inactive)
+        (print { event: "brand-verified", brand-id: brand-id })
         (ok (map-set brands
             { brand-id: brand-id }
             (merge brand-info { verified: true })
+        ))
+    )
+)
+
+;; Deactivate brand
+(define-public (deactivate-brand (brand-id uint))
+    (let
+        (
+            (brand-info (unwrap! (map-get? brands {brand-id: brand-id}) err-not-found))
+        )
+        (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+        (print { event: "brand-deactivated", brand-id: brand-id })
+        (ok (map-set brands
+            { brand-id: brand-id }
+            (merge brand-info { active: false })
         ))
     )
 )
@@ -106,20 +132,24 @@
         (
             (brand-info (unwrap! (map-get? brands {brand-id: brand-id}) err-not-found))
             (existing-vote (map-get? user-votes {brand-id: brand-id, voter: tx-sender}))
+            (current-total (* (get community-trust-score brand-info) (get vote-count brand-info)))
         )
+        (asserts! (get active brand-info) err-brand-inactive)
         (asserts! (is-none existing-vote) err-already-voted)
-        (asserts! (<= score u100) (err u105))
+        (asserts! (<= score u100) err-invalid-score)
         
         (map-set user-votes
             {brand-id: brand-id, voter: tx-sender}
             {score: score}
         )
         
+        (print { event: "trust-vote-submitted", brand-id: brand-id, voter: tx-sender, score: score })
+        
         (ok (map-set brands
             { brand-id: brand-id }
             (merge brand-info
                 {
-                    community-trust-score: (/ (+ (* (get community-trust-score brand-info) (get vote-count brand-info)) score)
+                    community-trust-score: (/ (+ current-total score)
                                             (+ (get vote-count brand-info) u1)),
                     vote-count: (+ (get vote-count brand-info) u1)
                 }
