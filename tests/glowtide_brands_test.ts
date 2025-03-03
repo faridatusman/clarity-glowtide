@@ -1,1 +1,1 @@
-[Previous test content plus new tests for score validation and brand deactivation]
+// [Previous test content plus new tests for name validation and trust score precision]
